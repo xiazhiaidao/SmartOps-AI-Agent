@@ -1,0 +1,29 @@
+# Git / 本地环境
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.venv
+venv
+
+# Python 缓存
+__pycache__
+*.pyc
+*.pyo
+*.log
+
+# 运行时数据（容器内使用 volume，不打进镜像）
+data/models
+data/vector_index
+data/charts
+data/uploads
+data/*.csv
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# 文档 / 测试（不需要进生产镜像）
+README.md
+tests
+requirements-dev.txt

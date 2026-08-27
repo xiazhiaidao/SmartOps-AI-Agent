@@ -1,0 +1,14 @@
+services:
+  smartops-ai-agent:
+    build: .
+    container_name: smartops-ai-agent
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - smartops_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  smartops_data:

@@ -1,0 +1,23 @@
+# ===== 核心 Web =====
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.29,<1.0
+python-multipart>=0.0.9
+
+# ===== 配置 =====
+pydantic>=2.5,<3.0
+pydantic-settings>=2.2,<3.0
+python-dotenv>=1.0,<2.0
+
+# ===== LLM 与 RAG =====
+openai>=1.30,<2.0
+langchain>=0.2,<1.0
+langchain-openai>=0.1,<1.0
+langchain-text-splitters>=0.2,<1.0
+fastembed>=0.3,<1.0
+numpy>=1.24,<2.0
+pypdf>=4.0,<6.0
+python-docx>=1.1,<2.0
+
+# ===== 数据分析与图表 =====
+pandas>=2.0,<3.0
+matplotlib>=3.8,<4.0

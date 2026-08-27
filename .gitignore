@@ -1,0 +1,30 @@
+# ===== 密钥与本地配置 =====
+.env
+.env.*
+!.env.example
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ===== 运行时生成数据（由 scripts/seed_data.py 生成） =====
+data/models/
+data/vector_index/
+data/charts/
+data/uploads/
+data/*.csv
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# ===== 日志 =====
+*.log
+
+# ===== IDE / 系统 =====
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

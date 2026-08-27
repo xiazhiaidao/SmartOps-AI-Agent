@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SmartOps 智能客服 · 多 Agent 系统</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --bubble: #334155; --accent: #4c8bf5;
+    --text: #e2e8f0; --muted: #94a3b8; --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    color: var(--text); height: 100vh; display: flex; justify-content: center; align-items: center;
+  }
+  #app {
+    width: min(880px, 96vw); height: min(92vh, 860px); background: var(--panel);
+    border-radius: 18px; display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,.45);
+  }
+  header {
+    padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,.08);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .logo { width: 40px; height: 40px; border-radius: 10px; background: var(--accent); display: grid; place-items: center; font-weight: 700; font-size: 18px; }
+  header h1 { font-size: 17px; } header p { font-size: 12px; color: var(--muted); }
+  #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { max-width: 78%; padding: 12px 16px; border-radius: var(--radius); line-height: 1.6; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .user { align-self: flex-end; background: var(--accent); border-bottom-right-radius: 4px; }
+  .bot { align-self: flex-start; background: var(--bubble); border-bottom-left-radius: 4px; }
+  .bot .intent-badge {
+    display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 20px;
+    background: rgba(76,139,245,.18); color: #9cc0ff; margin-bottom: 8px;
+  }
+  .typing { color: var(--muted); font-size: 13px; }
+  .chart { max-width: 100%; border-radius: 10px; margin-top: 10px; border: 1px solid rgba(255,255,255,.1); }
+  .sources { margin-top: 10px; font-size: 12px; color: var(--muted); border-top: 1px dashed rgba(255,255,255,.15); padding-top: 8px; }
+  .sources details { margin-top: 4px; cursor: pointer; }
+  .sources li { margin-left: 16px; }
+  .suggests { padding: 10px 20px; display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid rgba(255,255,255,.06); }
+  .chip {
+    font-size: 12px; padding: 6px 12px; border-radius: 20px; background: rgba(255,255,255,.06);
+    color: var(--text); cursor: pointer; border: 1px solid rgba(255,255,255,.12); transition: background .15s;
+  }
+  .chip:hover { background: rgba(76,139,245,.25); }
+  #inputbar { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid rgba(255,255,255,.08); }
+  #input {
+    flex: 1; background: #0f172a; border: 1px solid rgba(255,255,255,.15); border-radius: 10px;
+    padding: 12px 14px; color: var(--text); font-size: 14px; outline: none;
+  }
+  #input:focus { border-color: var(--accent); }
+  #send {
+    background: var(--accent); border: none; color: #fff; padding: 0 22px; border-radius: 10px;
+    font-size: 14px; cursor: pointer; font-weight: 600;
+  }
+  #send:disabled { opacity: .5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="logo">S</div>
+      <div>
+        <h1>SmartOps 智能客服</h1>
+        <p>知识库 RAG · 多 Agent 路由 · 数据分析 · 订单/设备查询</p>
+      </div>
+      <span id="stats" class="stats-line"></span>
+      <button id="uploadBtn" class="upload-btn" title="上传 txt/md/pdf/docx 到知识库">📄 入库</button>
+      <input type="file" id="fileInput" accept=".txt,.md,.markdown,.pdf,.docx" hidden />
+    </header>
+
+    <div id="messages"></div>
+
+    <div class="suggests" id="suggests">
+      <div class="chip">我的榨汁机坏了怎么办？</div>
+      <div class="chip">帮我分析各品类销售情况</div>
+      <div class="chip">查询订单 ORD-2026-00123</div>
+      <div class="chip">分析最近设备故障率</div>
+      <div class="chip">保修期是多久？</div>
+    </div>
+
+    <div id="inputbar">
+      <input id="input" placeholder="输入您的问题，例如：我的智能门锁开不了怎么办？" />
+      <button id="send">发送</button>
+    </div>
+  </div>
+
+<script>
+const messagesEl = document.getElementById('messages');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+
+const INTENT_LABEL = {
+  knowledge: '📚 知识库 Agent',
+  order: '📦 订单/设备查询 Agent',
+  data: '📊 数据分析 Agent',
+  human: '🤝 兜底 Agent',
+};
+
+function addBotMessage() {
+  const el = document.createElement('div');
+  el.className = 'msg bot';
+  messagesEl.appendChild(el);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return el;
+}
+
+function addUserMessage(text) {
+  const el = document.createElement('div');
+  el.className = 'msg user';
+  el.textContent = text;
+  messagesEl.appendChild(el);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return el;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function send() {
+  const text = input.value.trim();
+  if (!text || sendBtn.disabled) return;
+  input.value = '';
+  addUserMessage(text);
+
+  const bot = addBotMessage();
+  const state = { badge: '', text: '', extra: '' };
+  const render = () => {
+    bot.innerHTML = state.badge + escapeHtml(state.text) + state.extra;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  };
+  bot.innerHTML = '<span class="typing">正在思考…</span>';
+  sendBtn.disabled = true;
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text }),
+    });
+    if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const evt = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        evt.split('\n').forEach(line => {
+          if (!line.startsWith('data: ')) return;
+          const data = JSON.parse(line.slice(6));
+          if (data.type === 'meta') {
+            state.badge = `<span class="intent-badge">${INTENT_LABEL[data.intent] || data.intent}</span>`;
+          } else if (data.type === 'delta') {
+            state.text += data.text;
+            render();
+          } else if (data.type === 'chart') {
+            state.extra += `<img class="chart" src="${data.url}" alt="分析图表" />`;
+            render();
+          } else if (data.type === 'sources' && data.sources.length) {
+            const items = data.sources.map(s =>
+              `<li>来源「${escapeHtml(s.source)}」（相关度 ${s.score}）：${escapeHtml(s.text)}</li>`).join('');
+            state.extra += `<div class="sources"><details><summary>📎 引用 ${data.sources.length} 条知识库资料</summary><ul>${items}</ul></details></div>`;
+            render();
+          } else if (data.type === 'error') {
+            state.text = '⚠️ ' + data.text;
+            render();
+          }
+        });
+      }
+    }
+  } catch (err) {
+    bot.textContent = '⚠️ 网络错误：' + err.message;
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
+  }
+}
+
+sendBtn.addEventListener('click', send);
+input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+// ---------- 知识库统计 ----------
+const statsEl = document.getElementById('stats');
+async function loadStats() {
+  try {
+    const res = await fetch('/api/stats');
+    if (!res.ok) return;
+    const data = await res.json();
+    const shortModel = (data.embedding_model || '').replace(/^BAAI\//, '');
+    statsEl.textContent = `知识库 ${data.chunk_count} 块 · ${shortModel} · ${data.llm_model}`;
+  } catch (e) {
+    statsEl.textContent = '';
+  }
+}
+
+// ---------- 文档上传入库 ----------
+const uploadBtn = document.getElementById('uploadBtn');
+const fileInput = document.getElementById('fileInput');
+
+async function uploadFile(file) {
+  const bot = addBotMessage();
+  bot.innerHTML = `<span class="typing">正在解析 ${escapeHtml(file.name)}…</span>`;
+  uploadBtn.disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/ingest', { method: 'POST', body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    bot.textContent = `✅ 文档「${file.name}」已入库，新增 ${data.chunks} 个知识块。`;
+    loadStats();
+  } catch (err) {
+    bot.textContent = '⚠️ 入库失败：' + err.message;
+  } finally {
+    uploadBtn.disabled = false;
+    fileInput.value = '';
+  }
+}
+
+uploadBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) uploadFile(fileInput.files[0]);
+});
+
+document.getElementById('suggests').addEventListener('click', e => {
+  if (e.target.classList.contains('chip')) { input.value = e.target.textContent; send(); }
+});
+
+loadStats();
+</script>
+</body>
+</html>
