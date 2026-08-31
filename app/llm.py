@@ -12,4 +12,5 @@ def create_llm(temperature: float | None = None, max_tokens: int | None = None) 
         base_url=settings.llm_base_url,
         temperature=settings.llm_temperature if temperature is None else temperature,
         max_tokens=settings.llm_max_tokens if max_tokens is None else max_tokens,
+        timeout=settings.llm_timeout,
     )

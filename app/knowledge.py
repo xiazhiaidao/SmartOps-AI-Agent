@@ -8,7 +8,10 @@ from app.chunker import create_splitter
 from app.config import settings
 from app.embeddings import LocalEmbeddings
 from app.loader import load_document
+from app.logging import get_logger
 from app.vectorstore import NumpyVectorStore
+
+logger = get_logger(__name__)
 
 _RAG_SYSTEM_PROMPT = """你是「SmartOps 智能客服」的知识库问答助手，负责基于提供的资料回答用户问题。
 
@@ -53,7 +56,7 @@ class KnowledgeBase:
             return 0
         embeddings = self.embeddings.embed_documents(chunks)
         metas = []
-        for chunk in chunks:
+        for _chunk in chunks:
             meta = {"source": source}
             if metadata:
                 meta.update(metadata)
@@ -76,7 +79,7 @@ class KnowledgeBase:
                     result[file.name] = self.ingest_document(file)
                 except Exception as exc:
                     result[file.name] = 0
-                    print(f"[ingest] {file.name} 导入失败: {exc}")
+                    logger.exception("[ingest] %s 导入失败: %s", file.name, exc)
         return result
 
     # ---------- 查询侧：检索 + 生成 ----------

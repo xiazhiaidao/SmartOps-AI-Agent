@@ -14,12 +14,25 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # ---------- 应用基础信息 ----------
+    app_name: str = "SmartOps-AI-Agent"
+    app_version: str = "2.0.0"
+    environment: str = "development"  # development / test / production
+    log_level: str = "INFO"
+
+    # CORS：逗号分隔的 Origin 列表；`*` 表示允许所有来源
+    cors_origins: str = "*"
+
     # ---------- LLM 网关（OpenAI 兼容） ----------
     llm_base_url: str = "https://tokenrhythm.studio/v1"
     llm_api_key: str = ""
     llm_model: str = "deepseek-v4-flash"
     llm_temperature: float = 0.3
     llm_max_tokens: int = 2048
+    llm_timeout: float = 60.0
+
+    # ---------- 文件上传 ----------
+    upload_max_size_mb: int = 20
 
     # ---------- RAG ----------
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
@@ -55,6 +68,16 @@ class Settings(BaseSettings):
     @property
     def charts_dir(self) -> Path:
         return Path(self.data_dir) / "charts"
+
+    @property
+    def uploads_dir(self) -> Path:
+        return Path(self.data_dir) / "uploads"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        if self.cors_origins.strip() == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @property
     def orders_csv(self) -> Path:

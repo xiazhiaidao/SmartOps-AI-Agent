@@ -20,6 +20,9 @@ jobs:
         run: |
           pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Lint
+        run: ruff check app tests scripts
+
       - name: Run tests
         run: pytest -q
 

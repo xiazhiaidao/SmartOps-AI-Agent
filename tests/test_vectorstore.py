@@ -1,7 +1,6 @@
 """NumPy 向量库单元测试。"""
 import numpy as np
 import pytest
-
 from app.vectorstore import NumpyVectorStore
 
 

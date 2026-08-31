@@ -7,11 +7,14 @@
 .venv
 venv
 
-# Python 缓存
+# Python 缓存 / 本地工具
 __pycache__
 *.pyc
 *.pyo
 *.log
+.pytest_cache
+.tmp
+.pip-cache
 
 # 运行时数据（容器内使用 volume，不打进镜像）
 data/models

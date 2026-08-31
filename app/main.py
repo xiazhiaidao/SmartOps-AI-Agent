@@ -3,13 +3,14 @@
 启动：uvicorn app.main:app --reload --port 8000
 """
 import json
-import shutil
+import time
+import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -17,20 +18,58 @@ from app.agents.router import get_router
 from app.config import settings
 from app.dispatcher import dispatch
 from app.knowledge import get_knowledge_base
+from app.logging import get_logger, setup_logging
 
-app = FastAPI(title="SmartOps-AI-Agent", version="1.0.0", description="电商/物联网售后多 Agent 智能客服")
+BASE_DIR = Path(__file__).resolve().parents[1]
+WEB_DIR = BASE_DIR / "web"
 
+setup_logging()
+logger = get_logger(__name__)
+
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.app_version,
+    description="电商/物联网售后多 Agent 智能客服",
+)
+
+# CORS：支持通过环境变量 CORS_ORIGINS 配置（逗号分隔），默认允许所有来源
+cors_origins = settings.cors_origin_list
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
+    allow_credentials=cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # 图表与前端静态资源
 settings.charts_dir.mkdir(parents=True, exist_ok=True)
+settings.uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/charts", StaticFiles(directory=str(settings.charts_dir)), name="charts")
-app.mount("/web", StaticFiles(directory="web"), name="web")
+app.mount("/web", StaticFiles(directory=str(WEB_DIR)), name="web")
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    """为每个请求注入 request id，并记录访问日志。"""
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("request failed: %s %s rid=%s", request.method, request.url.path, request_id)
+        raise
+    duration_ms = (time.perf_counter() - start) * 1000
+    logger.info(
+        "%s %s -> %s (%.1fms) rid=%s",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+        request_id,
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 def _sse(obj: dict) -> str:
@@ -44,14 +83,17 @@ def _chunks(text: str, size: int = 12):
 
 @app.get("/")
 def index():
-    from fastapi.responses import FileResponse
-
-    return FileResponse("web/index.html")
+    return FileResponse(WEB_DIR / "index.html")
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "SmartOps-AI-Agent"}
+    return {
+        "status": "ok",
+        "service": settings.app_name,
+        "version": settings.app_version,
+        "environment": settings.environment,
+    }
 
 
 @app.get("/api/stats")
@@ -63,6 +105,10 @@ def stats():
 # ---------- SSE 流式对话 ----------
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="用户问题")
+    conversation_id: str | None = Field(
+        default=None,
+        description="会话 ID；不传则由服务端生成并随 meta 事件返回",
+    )
 
 
 @app.post("/api/chat")
@@ -70,11 +116,18 @@ async def chat(payload: ChatRequest):
     question = payload.message.strip()
     if not question:
         raise HTTPException(status_code=400, detail="message 不能为空")
+    conversation_id = payload.conversation_id or uuid.uuid4().hex
 
     async def event_stream():
         try:
             intent = await run_in_threadpool(get_router().classify, question)
-            yield _sse({"type": "meta", "intent": intent})
+            yield _sse(
+                {
+                    "type": "meta",
+                    "intent": intent,
+                    "conversation_id": conversation_id,
+                }
+            )
 
             result = await run_in_threadpool(dispatch, intent, question)
 
@@ -87,29 +140,55 @@ async def chat(payload: ChatRequest):
             if result.chart_url:
                 yield _sse({"type": "chart", "url": result.chart_url})
 
-            yield _sse({"type": "done"})
+            yield _sse({"type": "done", "conversation_id": conversation_id})
         except Exception as exc:
+            logger.exception("chat stream error: conversation_id=%s", conversation_id)
             yield _sse({"type": "error", "text": f"服务异常：{exc}"})
-            yield _sse({"type": "done"})
+            yield _sse({"type": "done", "conversation_id": conversation_id})
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ---------- 知识库文档入库 ----------
+_SUPPORTED_SUFFIXES = {".txt", ".md", ".markdown", ".pdf", ".docx"}
+
+
 @app.post("/api/ingest")
-async def ingest(file: UploadFile = File(...)):
-    kb = get_knowledge_base()
+async def ingest(file: UploadFile = File(...)):  # noqa: B008 - FastAPI 依赖注入惯用法
     suffix = Path(file.filename or "upload.txt").suffix.lower()
-    if suffix not in {".txt", ".md", ".markdown", ".pdf", ".docx"}:
-        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {suffix}，支持 txt/md/pdf/docx")
+    if suffix not in _SUPPORTED_SUFFIXES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的文件类型: {suffix}，支持 {'/'.join(sorted(_SUPPORTED_SUFFIXES))}",
+        )
 
-    tmp = settings.data_dir / f"_upload{suffix}"
-    with tmp.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+    max_bytes = settings.upload_max_size_mb * 1024 * 1024
+    tmp_path = settings.uploads_dir / f"{uuid.uuid4().hex}{suffix}"
 
-    chunks = kb.ingest_document(tmp)
-    tmp.unlink(missing_ok=True)
-    return {"file": file.filename, "chunks": chunks}
+    size = 0
+    try:
+        with tmp_path.open("wb") as buffer:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"文件大小超过限制（{settings.upload_max_size_mb}MB）",
+                    )
+                buffer.write(chunk)
+
+        kb = get_knowledge_base()
+        chunks = await run_in_threadpool(kb.ingest_document, tmp_path)
+        return {"file": file.filename, "chunks": chunks, "size": size}
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

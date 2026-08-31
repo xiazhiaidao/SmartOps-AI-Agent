@@ -10,15 +10,15 @@
   - 含“趋势/月度/时间” → 生成时间趋势折线图
   - 含“品类/类别” 或默认 → 生成品类柱状图
 """
-import re
+import uuid
 from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib import font_manager  # noqa: E402
 import pandas as pd  # noqa: E402
+from matplotlib import font_manager  # noqa: E402
 
 from app.agents import AgentResult
 from app.config import settings
@@ -59,10 +59,12 @@ def _load_devices() -> pd.DataFrame:
 
 def _save_chart(fig, name: str) -> str:
     settings.charts_dir.mkdir(parents=True, exist_ok=True)
-    path = settings.charts_dir / name
+    # 使用唯一文件名，避免并发分析请求互相覆盖图表
+    unique_name = f"{Path(name).stem}_{uuid.uuid4().hex[:8]}{Path(name).suffix}"
+    path = settings.charts_dir / unique_name
     fig.savefig(path, dpi=110, bbox_inches="tight")
     plt.close(fig)
-    return f"/charts/{name}"
+    return f"/charts/{unique_name}"
 
 
 def _analyze_orders(question: str) -> AgentResult:
@@ -84,7 +86,6 @@ def _analyze_orders(question: str) -> AgentResult:
     monthly = df.groupby(df["order_date"].dt.to_period("M"))["revenue"].sum()
 
     want_trend = any(k in question for k in ["趋势", "月度", "每月", "时间", "月份"])
-    want_cat = any(k in question for k in ["品类", "类别", "类目"])
 
     if want_trend:
         fig, ax = plt.subplots(figsize=(8, 4.2))

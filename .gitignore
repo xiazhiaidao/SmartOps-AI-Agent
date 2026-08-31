@@ -9,6 +9,9 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.pytest_cache/
+.tmp/
+.pip-cache/
 
 # ===== 运行时生成数据（由 scripts/seed_data.py 生成） =====
 data/models/

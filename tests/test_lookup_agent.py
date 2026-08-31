@@ -3,7 +3,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
-
 from app.agents import lookup_agent
 from app.agents.lookup_agent import LookupAgent
 
