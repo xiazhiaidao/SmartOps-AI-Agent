@@ -26,8 +26,8 @@ class FallbackAgent:
         # 强情绪 / 转人工意图 → 直接转人工，不调用 LLM，保证即时响应
         if any(k in question for k in _HANDOFF_KEYWORDS):
             return AgentResult(
-                text="收到，正在为您转接人工客服。\n"
-                     "温馨提示：人工客服工作时间为 9:00-21:00，当前您的工单已加急，预计 5 分钟内响应。",
+                text="收到，建议您联系商家人工客服，并提供订单号和问题描述。\n"
+                     "当前为演示系统，仅返回转人工提示，尚未连接真实客服或工单平台。",
                 type="handoff",
             )
         try:

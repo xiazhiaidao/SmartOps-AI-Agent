@@ -237,6 +237,11 @@
         renderBot(bot);
         break;
       case "done":
+        if (data.timings_ms) {
+          const meta = bot.row.querySelector(".msg-meta");
+          meta.textContent = `SmartOps Agent · ${(data.timings_ms.total / 1000).toFixed(2)}s`;
+          meta.title = `路由 ${data.timings_ms.routing}ms · 执行 ${data.timings_ms.agent}ms · 请求 ${data.request_id}`;
+        }
         renderBot(bot);
         break;
     }

@@ -1,9 +1,18 @@
 # SmartOps-AI-Agent 🛠️
 
 > **面向电商 / 物联网售后场景的多 Agent 智能客服与数据分析系统**  
-> FastAPI + LangChain + 本地 RAG + SSE 流式对话 + 产品级前端控制台
+> FastAPI + LangChain + 本地 RAG + SSE 分片输出 + Web 控制台
 
-一个面向 **求职作品集 / 技术面试展示** 的垂直领域 AI 应用项目：不是只调 API 的 demo，而是包含**意图路由、RAG 知识库、结构化数据查询、数据分析图表、流式输出、工程化质量保障**的完整闭环。
+将产品售后知识、订单查询和经营报表整合到一个聊天入口：Router 识别意图，调度知识库、订单/设备、数据分析、接待四个处理模块，返回答案、引用或图表。
+
+**技术栈：** Python · FastAPI · LangChain · BGE/FastEmbed · NumPy · pandas · matplotlib · SSE · Docker
+
+### 重点实现
+
+- **路由与降级：** 明确转人工优先；数据分析关键词走快速通道；其他问题使用 LLM 分类，失败时回退规则。
+- **有依据的回答：** 本地向量检索 + 最低相似度过滤；无有效资料时直接拒答并跳过生成调用；返回原始来源和片段。
+- **可追踪执行：** SSE 返回路由结果、请求 ID、处理结果类型和路由/Agent 耗时；控制台展示总耗时，可用请求 ID 对照日志。
+- **可复现验证：** 离线 pytest、Ruff 和 CI；覆盖转人工优先级、检索阈值、拒答、SSE 异常与引用链路。
 
 ---
 
@@ -14,7 +23,7 @@
 | 🧠 多 Agent 架构 | 4 个子 Agent：知识库 RAG / 订单设备查询 / 数据分析 / 兜底转人工，由 Router 统一调度 |
 | 📚 本地化 RAG | `BAAI/bge-small-zh-v1.5` 本地向量化 + NumPy 向量库，零外部 Embedding 依赖，支持引用溯源 |
 | 📊 数据分析 | pandas 统计 + matplotlib 图表，覆盖销售品类、月度趋势、设备故障码分布 |
-| ⚡ SSE 流式对话 | FastAPI `StreamingResponse` + 前端打字机，标准 `meta → delta → chart → sources → done` 事件协议 |
+| ⚡ SSE 分片输出 | FastAPI `StreamingResponse` + 前端打字机，`meta → sources（可选）→ delta → chart（可选）→ done` 事件协议 |
 | 🔐 工程化细节 | 请求 ID 中间件、结构化日志、上传大小限制、文件类型白名单、CORS 可配置 |
 | 🧪 质量保障 | pytest 接口层 + 单元测试、Ruff 静态检查、GitHub Actions CI |
 | 🐳 部署友好 | Docker Compose 一键启动，空 volume 自动生成种子数据与向量索引 |
@@ -127,11 +136,11 @@ docker compose up --build -d
 
 | 事件 | 说明 |
 |---|---|
-| `meta` | 路由意图 + `conversation_id` |
+| `meta` | 路由意图 + `conversation_id` + `request_id` |
 | `delta` | 文本分片，前端打字机 |
 | `chart` | 图表 URL（数据分析 Agent） |
 | `sources` | 知识库引用列表 |
-| `done` | 流结束 |
+| `done` | 流结束；成功时附 `result_type` 与 `timings_ms`（routing / agent / total，单位毫秒） |
 | `error` | 服务异常信息 |
 
 ### 其他接口
@@ -157,6 +166,8 @@ python -m pytest -q
 - NumPy 向量库增删查 / 持久化
 - 文本切分器
 - FastAPI 接口层：健康检查、SSE 流式协议、上传文件校验
+- RAG：阈值边界、过滤低相关片段、无命中不调用 LLM
+- 转人工优先级、端到端 handoff、SSE 请求追踪与异常脱敏
 
 GitHub Actions 会在每次 push / PR 自动执行 lint + tests。
 
@@ -179,7 +190,7 @@ SmartOps-AI-Agent/
 │   └── agents/            # Router + 4 个子 Agent
 ├── web/
 │   ├── index.html         # 聊天控制台页面
-│   ├── styles.css         # 产品级视觉样式
+│   ├── styles.css         # 控制台样式
 │   └── app.js             # SSE 流式 / 上传 / 状态面板逻辑
 ├── scripts/
 │   ├── seed_data.py       # 示例数据生成 + 入库
@@ -195,22 +206,21 @@ SmartOps-AI-Agent/
 
 ---
 
-## 💡 面试讲解建议
+## 技术设计与取舍
 
-1. **为什么用多 Agent 而不是一个大 Prompt？**  
-   按业务能力拆分子 Agent，路由层负责意图分发；子 Agent 职责单一，便于扩展、替换和单独测试。
+- **按业务能力拆分处理模块：** 路由层负责意图分发，各模块分别处理知识、查询、报表和接待，便于独立测试与替换数据源。
+- **限制知识回答依据：** BGE 向量化后执行余弦检索，通过 `SCORE_THRESHOLD` 过滤低相关片段；无命中时直接拒答。
+- **隔离外部服务故障：** 分类失败时回退规则；订单和报表处理无需 LLM。知识问答在有检索结果时仍依赖生成服务，失败会返回可追踪的错误事件。
+- **SSE 输出方式：** Agent 完成回答后，通过 `StreamingResponse` 将文本分片发送；前端用 `fetch ReadableStream` 渲染。当前并未接入模型 token 流，首字等待仍包含完整生成耗时。
+- **工程验证：** 请求 ID 与结构化日志、上传大小/类型校验、CORS 配置化、接口测试、Ruff、CI 和 Docker 部署配置。
 
-2. **RAG 如何控制幻觉？**  
-   本地 BGE 向量化 + 余弦相似度检索；设置 `SCORE_THRESHOLD`，相似度不足时不硬答，明确告知无法回答。
+---
 
-3. **LLM 挂了怎么办？**  
-   Router 先走关键词快速通道，LLM 解析失败自动降级关键词规则，保证系统永不因为外部 LLM 故障而不可用。
+## 实现边界
 
-4. **流式怎么实现？**  
-   FastAPI `StreamingResponse` + SSE 事件协议，前端 `fetch ReadableStream` 边读边渲染，提供打字机体验。
+当前是 **Router + 专项处理模块的工作流**，一次请求只选一个模块，不含自主规划、多轮工具循环或 Agent 间协商。订单/设备使用种子 CSV；数据分析使用固定报表逻辑；转人工仅为提示，没有真实工单集成。`conversation_id` 用于关联请求，未实现服务端多轮记忆。
 
-5. **工程化上做了哪些事？**  
-   请求 ID 与结构化日志、上传大小/类型校验、CORS 配置化、接口层测试、Ruff 静态检查、CI、Docker 一键部署。
+`SCORE_THRESHOLD=0.35` 是可调默认值，需结合知识库验证；检索相似度不代表答案准确率。
 
 ---
 
@@ -220,4 +230,4 @@ SmartOps-AI-Agent/
 
 ---
 
-*面向 电商客服 / 物联网售后 / AI Agent 工程化岗位打造的垂直领域落地项目。*
+*面向电商客服与物联网售后场景的 AI 服务。*

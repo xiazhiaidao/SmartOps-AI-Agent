@@ -1,4 +1,5 @@
 """Router 意图路由测试：验证关键词快速通道与 LLM 故障兜底。"""
+import pytest
 from app.agents.router import RouterAgent
 
 
@@ -31,3 +32,10 @@ def test_keyword_fallback_for_knowledge(monkeypatch):
 def test_keyword_fallback_for_human(monkeypatch):
     router = _force_keyword_router(monkeypatch)
     assert router.classify("你好呀") == "human"
+
+
+@pytest.mark.parametrize("question", ["我要投诉这个订单", "别分析了，转人工", "售后人工客服"])
+def test_explicit_handoff_takes_priority(question):
+    router = RouterAgent()
+    router._llm = _FailingLLM()
+    assert router.classify(question) == "human"

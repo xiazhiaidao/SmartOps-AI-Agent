@@ -98,33 +98,31 @@ class KnowledgeBase:
         return self._generate(question, results)
 
     def _generate(self, question: str, results: List) -> Dict:
-        if results:
-            context_blocks = []
-            for i, (text, meta, score) in enumerate(results, 1):
-                source = meta.get("source", "未知来源")
-                context_blocks.append(f"[资料{i}]（来源：{source}，相关度 {score:.2f}）\n{text}")
-            context = "\n\n".join(context_blocks)
-            sources = [
-                {
-                    "text": text[:200],
-                    "source": meta.get("source", "未知来源"),
-                    "score": round(score, 4),
-                }
-                for text, meta, score in results
-            ]
-        else:
-            context = ""
-            sources = []
+        if not results:
+            return {
+                "answer": "根据现有知识库无法回答这个问题，请补充相关资料或联系人工客服。",
+                "sources": [],
+                "top_k": 0,
+            }
+        context_blocks = []
+        for i, (text, meta, score) in enumerate(results, 1):
+            source = meta.get("source", "未知来源")
+            context_blocks.append(f"[资料{i}]（来源：{source}，相关度 {score:.2f}）\n{text}")
+        context = "\n\n".join(context_blocks)
+        sources = [
+            {
+                "text": text[:200],
+                "source": meta.get("source", "未知来源"),
+                "score": round(score, 4),
+            }
+            for text, meta, score in results
+        ]
 
         messages = [
             {"role": "system", "content": _RAG_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": (
-                    f"参考资料：\n{context}\n\n---\n\n用户问题：{question}"
-                    if context
-                    else f"用户问题：{question}\n\n（当前知识库暂无资料，请用通用知识作答，并说明此回答未引用知识库。）"
-                ),
+                "content": f"参考资料：\n{context}\n\n---\n\n用户问题：{question}",
             },
         ]
         response = self.llm.invoke(messages)
@@ -140,6 +138,7 @@ class KnowledgeBase:
             "embedding_model": settings.embedding_model,
             "llm_model": settings.llm_model,
             "top_k": settings.top_k,
+            "score_threshold": settings.score_threshold,
         }
 
 

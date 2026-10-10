@@ -13,6 +13,7 @@ import re
 from app.llm import create_llm
 
 VALID_INTENTS = ("knowledge", "order", "data", "human")
+_HANDOFF_KEYWORDS = ("转人工", "人工客服", "投诉")
 
 _ROUTER_PROMPT = """你是智能客服系统的意图路由器。根据用户的问题，判断应交给哪个子 Agent 处理，只输出一个英文单词，不要输出任何其他内容。
 
@@ -41,6 +42,8 @@ _KEYWORD_RULES = [
 
 
 def _keyword_classify(question: str) -> str:
+    if any(k in question for k in _HANDOFF_KEYWORDS):
+        return "human"
     for intent, keywords in _KEYWORD_RULES:
         if any(k in question for k in keywords):
             return intent
@@ -58,6 +61,8 @@ class RouterAgent:
         return self._llm
 
     def classify(self, question: str) -> str:
+        if any(k in question for k in _HANDOFF_KEYWORDS):
+            return "human"
         # 1) 先跑关键词快速通道：命中高置信度词（数据分析意图）直接返回，减少一次 LLM 调用
         if any(k in question for k in ["分析", "统计", "销量", "销售额", "报表", "故障率", "趋势"]):
             return "data"

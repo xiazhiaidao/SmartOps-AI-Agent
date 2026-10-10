@@ -53,6 +53,7 @@ app.mount("/web", StaticFiles(directory=str(WEB_DIR)), name="web")
 async def request_context(request: Request, call_next):
     """为每个请求注入 request id，并记录访问日志。"""
     request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    request.state.request_id = request_id
     start = time.perf_counter()
     try:
         response = await call_next(request)
@@ -104,32 +105,37 @@ def stats():
 
 # ---------- SSE 流式对话 ----------
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, description="用户问题")
+    message: str = Field(..., min_length=1, max_length=4000, description="用户问题")
     conversation_id: str | None = Field(
         default=None,
+        max_length=64,
         description="会话 ID；不传则由服务端生成并随 meta 事件返回",
     )
 
 
 @app.post("/api/chat")
-async def chat(payload: ChatRequest):
+async def chat(payload: ChatRequest, request: Request):
     question = payload.message.strip()
     if not question:
         raise HTTPException(status_code=400, detail="message 不能为空")
     conversation_id = payload.conversation_id or uuid.uuid4().hex
 
     async def event_stream():
+        started = time.perf_counter()
         try:
             intent = await run_in_threadpool(get_router().classify, question)
+            routed = time.perf_counter()
             yield _sse(
                 {
                     "type": "meta",
                     "intent": intent,
                     "conversation_id": conversation_id,
+                    "request_id": request.state.request_id,
                 }
             )
 
             result = await run_in_threadpool(dispatch, intent, question)
+            finished = time.perf_counter()
 
             if result.sources:
                 yield _sse({"type": "sources", "sources": result.sources})
@@ -140,11 +146,29 @@ async def chat(payload: ChatRequest):
             if result.chart_url:
                 yield _sse({"type": "chart", "url": result.chart_url})
 
-            yield _sse({"type": "done", "conversation_id": conversation_id})
-        except Exception as exc:
+            yield _sse({
+                "type": "done",
+                "conversation_id": conversation_id,
+                "request_id": request.state.request_id,
+                "result_type": result.type,
+                "timings_ms": {
+                    "routing": round((routed - started) * 1000, 1),
+                    "agent": round((finished - routed) * 1000, 1),
+                    "total": round((finished - started) * 1000, 1),
+                },
+            })
+        except Exception:
             logger.exception("chat stream error: conversation_id=%s", conversation_id)
-            yield _sse({"type": "error", "text": f"服务异常：{exc}"})
-            yield _sse({"type": "done", "conversation_id": conversation_id})
+            yield _sse({
+                "type": "error",
+                "text": "服务暂时不可用，请稍后重试。",
+                "request_id": request.state.request_id,
+            })
+            yield _sse({
+                "type": "done",
+                "conversation_id": conversation_id,
+                "request_id": request.state.request_id,
+            })
 
     return StreamingResponse(
         event_stream(),
